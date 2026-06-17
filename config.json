@@ -1,1 +1,1 @@
-{"screen_width": 1000, "screen_height": 800, "quality": "max", "map_file": "maps\\default.json", "spawn_x": 10, "spawn_y": 10, "player_speed": 5.0}
+{"screen_width": 1000, "screen_height": 800, "quality": "max", "map_file": "maps\\open_space.json", "spawn_x": 10, "spawn_y": 10, "player_speed": 5.0}

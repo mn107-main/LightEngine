@@ -1,5 +1,52 @@
 # Changelog
 
+## 4.0.0 — 2026
+
+### Major
+- **Weather system** — dynamic rain, snow, and fog with per-particle physics
+- **Day/night cycle** — smooth ambient brightness oscillation, adjustable speed (+/- keys)
+- **Extended bot AI** — three-state behavior: `patrol` (waypoints), `investigate` (last known player pos), `alert` (chase with visual pulse)
+- **Ray debug mode** (R key) — visualizes every cast ray for debugging raycasting
+- **Profiler** — per-stage timing (input, update, scene, objects, lighting, particles)
+- **Event logging** — game events written to `lightengine.log`
+- **Hot-reload** (H key) — reloads `config.json` at runtime
+- **Sprite animation** — objects pulse/animate, bots have eyes and idle bob
+
+### Weather
+- Three types: rain (streaks, high density), snow (gentle fall with wobble), fog (large translucent circles)
+- Quality-gated: enabled on Normal and Max presets
+- Randomized on each launch
+
+### Day/Night
+- Ambient brightness varies sinusoidally over time
+- `+`/`-` keys increase/decrease cycle speed
+- Affects scene rendering and weather visibility
+
+### Bot AI states
+- `patrol` — walks through `patrol` waypoints from map JSON, loops automatically
+- `investigate` — moves to last known player position when alert level drops
+- `alert` — high-alert chase mode with pulsing red ring; triggers on player sight
+- `set_patrol(points)` — API method to set patrol route
+- Alert level system — 0.0–1.0, rises while player visible, decays when hidden
+- Memory: bots remember last seen player position and investigate it
+
+### New maps
+- `maps/cave.json` — underground cave with narrow corridors and violet crystal light
+- `maps/room.json` — multi-room interior with warm ceiling lights
+- `maps/open_space.json` — large arena with sparse cover and roaming bots
+- Bot patrol points supported in JSON: `"patrol": [[x,y], [x,y], ...]`
+
+### Config
+- `config.json` now uses forward-slash paths (cross-platform)
+- Added `player_light_radius`, `fov_angle_deg`, `ray_step_deg` fields
+
+### UI
+- Weather type and day factor displayed in normal HUD
+- Profiler data shown in debug overlay
+- Controls hint updated with R (ray debug), H (hot-reload), +/- (day speed)
+
+---
+
 ## 3.0.0 — 2026
 
 ### Major

@@ -24,6 +24,7 @@ VERSIONS = [
     {"id": "le1", "label": "LE 1.0", "file": "le1.0.0.py", "desc": "Original raycasting"},
     {"id": "le2", "label": "LE 2.0", "file": "le2.0.0.py", "desc": "Realistic lighting + effects"},
     {"id": "le3", "label": "LE 3.0", "file": "le3.0.0.py", "desc": "Bot NPCs + wall LOS + wait"},
+    {"id": "le4", "label": "LE 4.0", "file": "le4.0.0.py", "desc": "Weather, day/night, AI states, logging, profiler"},
 ]
 
 QUALITY_PRESETS = {
@@ -41,6 +42,7 @@ QUALITY_PRESETS = {
         "desc": [
             "Balanced quality & speed",
             "Colored lights + particles",
+            "Weather + day/night cycle",
             "Light flickering effect",
             "Default experience",
         ],
@@ -51,6 +53,7 @@ QUALITY_PRESETS = {
             "High quality raycasting",
             "Smooth gradients + colored lights",
             "Dust particles in light beams",
+            "Weather + day/night cycle",
             "Heavy but beautiful",
         ],
     },
