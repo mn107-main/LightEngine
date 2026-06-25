@@ -122,6 +122,11 @@ class Launcher:
             "PLAY", self.font_heading, ACCENT, ACCENT_HOVER,
         )
 
+        self.editor_button = Button(
+            (SCREEN_WIDTH // 2 - 80, SCREEN_HEIGHT - 140, 160, 48),
+            "MAP EDITOR", self.font_heading, BLUE, BLUE_HOVER,
+        )
+
         self.version_buttons = []
         for i, v in enumerate(VERSIONS):
             n = len(VERSIONS)
@@ -220,6 +225,8 @@ class Launcher:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
                         self.launch_game()
+                    elif event.key == pygame.K_e:
+                        self.launch_editor()
                     elif event.key == pygame.K_ESCAPE:
                         pygame.quit()
                         sys.exit(0)
@@ -248,6 +255,10 @@ class Launcher:
             self.play_button.update(mouse_pos)
             if self.play_button.clicked(mouse_pos, self.mouse_down):
                 self.launch_game()
+
+            self.editor_button.update(mouse_pos)
+            if self.editor_button.clicked(mouse_pos, self.mouse_down):
+                self.launch_editor()
 
             self.draw_background()
 
@@ -304,11 +315,19 @@ class Launcher:
             self.screen.blit(map_label, (30, self._sections["map_y"] + 40))
 
             self.play_button.draw(self.screen)
+            self.editor_button.draw(self.screen)
 
             hint = self.font_small.render("Enter = Play | Esc = Quit", True, GRAY)
             self.screen.blit(hint, (SCREEN_WIDTH // 2 - hint.get_width() // 2, SCREEN_HEIGHT - 25))
 
             pygame.display.flip()
+
+    def launch_editor(self):
+        pygame.display.quit()
+        subprocess.run([sys.executable, "map_editor.py"])
+        pygame.display.init()
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        pygame.display.set_caption("LightEngine Launcher")
 
     def launch_game(self):
         width, height = RESOLUTIONS[self.selected_res]

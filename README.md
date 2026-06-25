@@ -111,6 +111,13 @@ References: `"player"`, `"static#0"`, `"dynamic#0"`, `"bot#0"`
 
 LE 4.0.0 features dynamic weather: rain, snow, and fog. Weather is randomly selected on startup when quality is Normal or Max. The day/night cycle smoothly transitions ambient brightness with a sinusoidal curve (use +/- keys to adjust speed).
 
+## Future Ideas
+
+- **Map Editor** — visual editor inside Pygame for placing walls, lights, and NPC spawn points, saving to JSON
+- **Fog of War** — classic RTS fog that clears only around the player and allies, stays gray beyond
+- **Entity Animation** — sprites with frame animation from atlas for NPCs and the player
+- **Network Mode** — client-server via sockets/websockets for multiplayer movement
+
 ## License
 
 MIT License — see [LICENSE](LICENSE).

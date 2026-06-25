@@ -1,5 +1,17 @@
 # Changelog
 
+## 5.0.0 — 2026-06-25
+
+### Added
+- **Map Editor** — New standalone `map_editor.py`: visual Pygame-based level editor with wall painting, entity placement (static lights, dynamic objects, bots, player spawn), drag-to-move, scroll-to-adjust properties, color cycling, and JSON save/load. Integrated into the launcher (button + E key).
+- **Fog of War** — Classic RTS fog mechanic: unexplored cells render black, explored-but-not-visible cells are dimmed (alpha 180). FOV-based raycasting marks cells. Toggle with F key. Quality-gated (off in Low, on in Normal/Max). See `update_fog()` and `draw_fog_overlay()` methods.
+- **Entity Animation** — Procedural sprite generation for player (8 directional arrow frames), bots (8 directional arrow frames), and dynamic objects (4-frame diamond animation). PNG sprite atlas support via `sprites/` directory with automatic loading. Falls back to circle rendering when sprites unavailable. Engine reference (`engine`) added to `DynamicObject`.
+- **Network Mode** — TCP-based multiplayer server/client (port 54321). Server runs full simulation and broadcasts state. Client connects, renders remote state, and sends WASD input. CLI flags `--server` and `--client HOST`. See `network.py` module.
+
+### Launcher
+- Added "MAP EDITOR" button and keyboard shortcut (E) to launch the map editor.
+- Launcher reinitializes display after editor exits, allowing repeated use without restart.
+
 ## 4.0.0 — 2026
 
 ### Major

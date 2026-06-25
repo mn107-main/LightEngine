@@ -6,10 +6,67 @@ import random
 import shutil
 import time as time_mod
 from collections import OrderedDict
+from pathlib import Path
 
 import pygame
 
 pygame.init()
+
+SPRITES_DIR = Path(__file__).parent / "sprites"
+SPRITE_SIZE = 32
+
+
+def load_sprite_sheet(fname, frame_w=SPRITE_SIZE, frame_h=SPRITE_SIZE):
+    path = SPRITES_DIR / fname
+    if not path.exists():
+        return None
+    sheet = pygame.image.load(str(path)).convert_alpha()
+    sw, sh = sheet.get_size()
+    frames = []
+    for x in range(0, sw, frame_w):
+        for y in range(0, sh, frame_h):
+            if x + frame_w <= sw and y + frame_h <= sh:
+                frame = sheet.subsurface((x, y, frame_w, frame_h))
+                frames.append(frame)
+    return frames if frames else None
+
+
+def gen_sprite_frames(color, shape="arrow", n_frames=8, size=SPRITE_SIZE):
+    frames = []
+    half = size // 2
+    r = half - 2
+    for i in range(n_frames):
+        angle = (2 * math.pi * i) / n_frames
+        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        glow = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(glow, (*color, 50), (half, half), half)
+        surf.blit(glow, (0, 0))
+        if shape == "arrow":
+            tip = (half + math.cos(angle) * r, half + math.sin(angle) * r)
+            la = angle + 2.3
+            ra = angle - 2.3
+            l = (half + math.cos(la) * r * 0.55, half + math.sin(la) * r * 0.55)
+            rp = (half + math.cos(ra) * r * 0.55, half + math.sin(ra) * r * 0.55)
+            pygame.draw.polygon(surf, color, [tip, l, rp])
+            pygame.draw.circle(surf, (min(255, color[0] + 60), min(255, color[1] + 60),
+                                       min(255, color[2] + 60)), (half, half), max(2, half // 4))
+        elif shape == "diamond":
+            pulse = 0.8 + 0.2 * math.sin(i * math.pi / 1.5)
+            c = tuple(min(255, int(v * pulse)) for v in color)
+            pts = [(half, 2 + int(half * 0.2)), (size - 3, half),
+                   (half, size - 3), (2, half)]
+            pygame.draw.polygon(surf, c, pts)
+            ip = (half, half + int(half * 0.3))
+            pygame.draw.circle(surf, (min(255, c[0] + 40), min(255, c[1] + 40),
+                                       min(255, c[2] + 40)), ip, max(1, half // 5))
+        elif shape == "circle":
+            pulse = 0.85 + 0.15 * math.sin(i * math.pi / 2)
+            c = tuple(min(255, int(v * pulse)) for v in color)
+            pygame.draw.circle(surf, c, (half, half), r - 2)
+            pygame.draw.circle(surf, (min(255, c[0] + 30), min(255, c[1] + 30),
+                                       min(255, c[2] + 30)), (half - r // 3, half - r // 3), max(1, r // 4))
+        frames.append(surf)
+    return frames
 
 QUALITY_PRESETS = {
     "low": {
@@ -26,6 +83,7 @@ QUALITY_PRESETS = {
         "ambient_light": 0,
         "weather": False,
         "day_night": False,
+        "fog_of_war": False,
     },
     "normal": {
         "ray_step_deg": 1.2,
@@ -41,6 +99,7 @@ QUALITY_PRESETS = {
         "ambient_light": 0,
         "weather": True,
         "day_night": True,
+        "fog_of_war": True,
     },
     "max": {
         "ray_step_deg": 0.5,
@@ -56,6 +115,7 @@ QUALITY_PRESETS = {
         "ambient_light": 0,
         "weather": True,
         "day_night": True,
+        "fog_of_war": True,
     },
 }
 
@@ -200,7 +260,7 @@ class DynamicObject:
         'x', 'y', 'light_radius', 'light_intensity', 'color', 'size',
         '_last_pos', '_cached_light_surface', '_last_cache_key',
         'phase', 'flicker_offset', 'lid', 'anim_sprite', 'anim_timer',
-        'frame', 'num_frames',
+        'frame', 'num_frames', 'engine',
     )
 
     def __init__(self, x, y, light_radius=0, light_intensity=1.0, color=(200, 100, 50), size=0.8, lid=-1):
@@ -211,6 +271,7 @@ class DynamicObject:
         self.color = color
         self.size = size
         self.lid = lid
+        self.engine = None
         self._last_pos = (x, y)
         self._cached_light_surface = None
         self._last_cache_key = None
@@ -237,6 +298,17 @@ class DynamicObject:
     def draw(self, screen, cell_size, camera_x, camera_y):
         screen_x = self.x * cell_size - camera_x
         screen_y = self.y * cell_size - camera_y
+        frames = self.engine._sprite_cache.get("object") if self.engine else None
+        if frames:
+            f = self.anim_timer / 0.1
+            idx = int(f) % len(frames)
+            sprite = frames[idx]
+            sw = sprite.get_width()
+            scale = max(1, int(cell_size * self.size))
+            scaled = pygame.transform.scale(sprite, (scale, scale))
+            sr = scaled.get_rect(center=(int(screen_x), int(screen_y)))
+            screen.blit(scaled, sr)
+            return
         radius_px = int(cell_size * self.size // 2)
         anim_offset = math.sin(self.anim_timer * 5) * 2
         pulse = 0.85 + 0.15 * math.sin(self.phase)
@@ -590,25 +662,33 @@ class Bot:
     def draw(self, screen, cell_size, camera_x, camera_y):
         sx = self.x * cell_size - camera_x
         sy = self.y * cell_size - camera_y
+        frames = self.engine._sprite_cache.get("bot") if self.engine else None
+        if frames:
+            n = len(frames)
+            idx = int((self.angle / (2 * math.pi)) * n + 0.5) % n
+            sprite = frames[idx]
+            scale = max(1, int(cell_size * 0.85))
+            scaled = pygame.transform.scale(sprite, (scale, scale))
+            sr = scaled.get_rect(center=(int(sx), int(sy)))
+            screen.blit(scaled, sr)
+
+            if self.state == "alert":
+                warn_r = scale // 2 + 4
+                pygame.draw.circle(screen, (255, 0, 0, int(100 + 155 * (0.5 + 0.5 * math.sin(time_mod.time() * 8)))), (int(sx), int(sy)), warn_r, 2)
+
+            if self._say_text and self._say_timer > 0:
+                if not hasattr(self, '_say_font'):
+                    self._say_font = pygame.font.Font(None, 14)
+                text_surf = self._say_font.render(self._say_text, True, (255, 255, 255))
+                if text_surf:
+                    screen.blit(text_surf, (int(sx - text_surf.get_width() / 2), int(sy - scale // 2 - 14)))
+            return
+
         r = int(cell_size * 0.38)
 
         alert_pulse = 0.7 + 0.3 * math.sin(time_mod.time() * 4) if self.state == "alert" else 1.0
         dc = tuple(int(c * alert_pulse) for c in self.color)
         pygame.draw.circle(screen, dc, (int(sx), int(sy)), r)
-
-        bob = math.sin(self._anim_timer * 6) * 2
-        ex = sx + math.cos(self.angle + 0.4) * cell_size * 0.55
-        ey = sy + math.sin(self.angle + 0.4) * cell_size * 0.55 + bob
-        ex2 = sx + math.cos(self.angle - 0.4) * cell_size * 0.55
-        ey2 = sy + math.sin(self.angle - 0.4) * cell_size * 0.55 + bob
-        pygame.draw.line(screen, (255, 255, 255), (int(sx), int(sy + bob)), (int(ex), int(ey)), 2)
-        pygame.draw.line(screen, (255, 255, 255), (int(sx), int(sy + bob)), (int(ex2), int(ey2)), 2)
-
-        eye_offset = 3
-        eye_r = max(1, r // 4)
-        pygame.draw.circle(screen, (255, 255, 255), (int(sx - eye_offset), int(sy + bob - eye_offset)), eye_r)
-        pygame.draw.circle(screen, (255, 255, 255), (int(sx + eye_offset), int(sy + bob - eye_offset)), eye_r)
-
         if self.light_on:
             light_pulse = 0.85 + 0.15 * math.sin(time_mod.time() * 3 + self.lid)
             lc = tuple(min(255, int(c * light_pulse)) for c in self.color)
@@ -676,14 +756,21 @@ class DustParticle:
 
 
 class LightEngine:
-    def __init__(self, quality="normal"):
+    def __init__(self, quality="normal", network_mode=None, server_host=None):
+        self.network_mode = network_mode
+        self.server_host = server_host
         self.quality = quality
         self.load_config()
         self.quality = quality
         self.apply_quality_preset()
 
         self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
-        pygame.display.set_caption("LightEngine v4.0.0")
+        mode_str = ""
+        if self.network_mode == "server":
+            mode_str = " [SERVER]"
+        elif self.network_mode == "client":
+            mode_str = " [CLIENT]"
+        pygame.display.set_caption(f"LightEngine v5.0.0{mode_str}")
         self.clock = pygame.time.Clock()
         self.debug = False
         self.semi_debug = False
@@ -708,6 +795,7 @@ class LightEngine:
         self._obj_lit_cache = {}
         self.bots = []
         self.player_light_on = True
+        self._pressed_keys = set()
         self.load_map()
         self.load_static_lights()
         self.load_dynamic_objects()
@@ -715,6 +803,8 @@ class LightEngine:
         self.init_particles()
         self.init_weather()
         self._precompute_static_wall_light()
+
+        self._init_sprites()
 
         self.light_gradient_cache = OrderedDict()
         self.max_gradient_cache = self.gradient_cache_size
@@ -747,7 +837,31 @@ class LightEngine:
         self._hot_reload_timer = 0.0
         self._last_config_mtime = self._get_config_mtime()
 
-        self.logger.event("INIT", f"Map: {self.map_file}, Quality: {quality}, Weather: {self.weather_enabled}, Day/Night: {self.day_night_enabled}")
+        self.fog_explored = [[False] * self.grid_size for _ in range(self.grid_size)]
+        self.fog_visible = set()
+        if not self.fog_of_war:
+            for y in range(self.grid_size):
+                for x in range(self.grid_size):
+                    self.fog_explored[y][x] = True
+
+        self.logger.event("INIT", f"Map: {self.map_file}, Quality: {quality}, Weather: {self.weather_enabled}, Day/Night: {self.day_night_enabled}, Fog: {self.fog_of_war}")
+
+        # Network setup
+        self._client = None
+        self._server = None
+        if self.network_mode == "server":
+            import network as net
+            self._server = net.GameServer(self)
+            self._server.start()
+            self.logger.event("NET", "Server mode started")
+        elif self.network_mode == "client" and self.server_host:
+            import network as net
+            self._client = net.GameClient(host=self.server_host)
+            if self._client.connect():
+                self.logger.event("NET", f"Connected to {self.server_host}")
+            else:
+                self.logger.event("NET", f"Failed to connect to {self.server_host}")
+                self._client = None
 
     def _get_config_mtime(self):
         try:
@@ -835,6 +949,7 @@ class LightEngine:
         self.ambient_light = preset["ambient_light"]
         self.weather_enabled = preset["weather"]
         self.day_night_enabled = preset["day_night"]
+        self.fog_of_war = preset.get("fog_of_war", True)
 
     def load_static_lights(self):
         if self._map_static_lights:
@@ -866,22 +981,24 @@ class LightEngine:
                 print(f"to much light dynamic obj ({count} in map file) max count {self.max_dynamic_objects}!!")
                 self._map_dynamic_objects = self._map_dynamic_objects[:self.max_dynamic_objects]
             print(f"dynamic objects obj loaded: {len(self._map_dynamic_objects)}")
-            self.dynamic_objects = [
-                DynamicObject(o["x"], o["y"], light_radius=o["light_radius"],
-                              light_intensity=o["light_intensity"],
-                              color=tuple(o["color"]), lid=o.get("id", i))
-                for i, o in enumerate(self._map_dynamic_objects)
-            ]
+            self.dynamic_objects = []
+            for i, o in enumerate(self._map_dynamic_objects):
+                obj = DynamicObject(o["x"], o["y"], light_radius=o["light_radius"],
+                                    light_intensity=o["light_intensity"],
+                                    color=tuple(o["color"]), lid=o.get("id", i))
+                obj.engine = self
+                self.dynamic_objects.append(obj)
         else:
             default_dyn = [
                 (12, 10, 2, 0.5, (220, 80, 80)),
                 (7, 14, 1.5, 0.4, (80, 220, 80)),
                 (4, 4, 1.5, 0.35, (220, 220, 80)),
             ]
-            self.dynamic_objects = [
-                DynamicObject(x, y, light_radius=lr, light_intensity=li, color=c, lid=i)
-                for i, (x, y, lr, li, c) in enumerate(default_dyn)
-            ]
+            self.dynamic_objects = []
+            for i, (x, y, lr, li, c) in enumerate(default_dyn):
+                obj = DynamicObject(x, y, light_radius=lr, light_intensity=li, color=c, lid=i)
+                obj.engine = self
+                self.dynamic_objects.append(obj)
             print(f"dynamic objects obj loaded: {len(self.dynamic_objects)} (default)")
 
     def load_bots(self):
@@ -911,6 +1028,19 @@ class LightEngine:
             x = random.uniform(0, self.grid_size * self.cell_size)
             y = random.uniform(0, self.grid_size * self.cell_size)
             self.particles.append(DustParticle(x, y))
+
+    def _init_sprites(self):
+        self._sprite_cache = {}
+        sheet_order = [
+            ("player", "arrow", (0, 220, 0), 8),
+            ("bot", "arrow", (0, 100, 255), 8),
+            ("object", "diamond", (200, 100, 50), 4),
+        ]
+        for name, shape, default_color, n in sheet_order:
+            frames = load_sprite_sheet(f"{name}.png", SPRITE_SIZE, SPRITE_SIZE)
+            if frames is None:
+                frames = gen_sprite_frames(default_color, shape, n, SPRITE_SIZE)
+            self._sprite_cache[name] = frames
 
     def init_weather(self):
         self.weather_particles = []
@@ -1028,14 +1158,22 @@ class LightEngine:
 
     def handle_input(self, dt):
         keys = pygame.key.get_pressed()
-        move_x, move_y = 0, 0
+        self._pressed_keys = set()
         if keys[pygame.K_w]:
-            move_y -= 1
+            self._pressed_keys.add("w")
+            move_y = -1
+        else:
+            move_y = 0
         if keys[pygame.K_s]:
+            self._pressed_keys.add("s")
             move_y += 1
         if keys[pygame.K_a]:
-            move_x -= 1
+            self._pressed_keys.add("a")
+            move_x = -1
+        else:
+            move_x = 0
         if keys[pygame.K_d]:
+            self._pressed_keys.add("d")
             move_x += 1
 
         if move_x != 0 or move_y != 0:
@@ -1091,10 +1229,65 @@ class LightEngine:
     def draw_player(self, screen, camera_x, camera_y):
         screen_x = int(self.player_x * self.cell_size - camera_x)
         screen_y = int(self.player_y * self.cell_size - camera_y)
+        frames = self._sprite_cache.get("player")
+        if frames:
+            n = len(frames)
+            idx = int((self.player_angle / (2 * math.pi)) * n + 0.5) % n
+            sprite = frames[idx]
+            scale = max(1, int(self.cell_size * 0.8))
+            scaled = pygame.transform.scale(sprite, (scale, scale))
+            sr = scaled.get_rect(center=(screen_x, screen_y))
+            screen.blit(scaled, sr)
+            return
         pygame.draw.circle(screen, (0, 240, 0), (screen_x, screen_y), self.cell_size // 3)
         end_x = screen_x + math.cos(self.player_angle) * self.cell_size
         end_y = screen_y + math.sin(self.player_angle) * self.cell_size
         pygame.draw.line(screen, (255, 60, 60), (screen_x, screen_y), (end_x, end_y), 2)
+
+    def update_fog(self):
+        if not self.fog_of_war:
+            return
+        self.fog_visible.clear()
+        px = self.player_x * self.cell_size + self.cell_size / 2
+        py = self.player_y * self.cell_size + self.cell_size / 2
+        max_dist = self.player_light_radius * self.cell_size
+        start_angle = self.player_angle - self.fov_angle / 2
+        num_rays = max(6, int(self.fov_angle / self.ray_step) + 1)
+        for i in range(num_rays):
+            angle = start_angle + i * self.ray_step
+            cos_a, sin_a = self._fast_sin_cos(angle)
+            dist = 0
+            while dist < max_dist:
+                fx = px + cos_a * dist
+                fy = py + sin_a * dist
+                cx = int(fx // self.cell_size)
+                cy = int(fy // self.cell_size)
+                if 0 <= cx < self.grid_size and 0 <= cy < self.grid_size:
+                    self.fog_explored[cy][cx] = True
+                    self.fog_visible.add((cx, cy))
+                    if self.map_grid[cy][cx] == 1:
+                        break
+                else:
+                    break
+                dist += self.cast_step
+
+    def draw_fog_overlay(self, screen, camera_x, camera_y):
+        if not self.fog_of_war:
+            return
+        start_x, end_x, start_y, end_y = self.get_visible_cells_range(camera_x, camera_y)
+        for y in range(start_y, end_y):
+            for x in range(start_x, end_x):
+                if not self.fog_explored[y][x]:
+                    sx = x * self.cell_size - camera_x
+                    sy = y * self.cell_size - camera_y
+                    pygame.draw.rect(screen, (0, 0, 0), (sx, sy, self.cell_size, self.cell_size))
+                elif (x, y) not in self.fog_visible:
+                    sx = x * self.cell_size - camera_x
+                    sy = y * self.cell_size - camera_y
+                    dim = pygame.Surface((self.cell_size, self.cell_size))
+                    dim.set_alpha(180)
+                    dim.fill((0, 0, 0))
+                    screen.blit(dim, (sx, sy))
 
     def _is_light_visible_on_screen(self, sx, sy, radius_px):
         return not (sx + radius_px < 0 or sx - radius_px > self.screen_width
@@ -1767,7 +1960,8 @@ class LightEngine:
         day_factor = self.get_day_factor()
         weather_str = f" | {self.weather_type.upper()}" if self.weather_enabled and self.weather_type != "none" else ""
         day_str = f" | Day {day_factor:.2f}x" if self.day_night_enabled else ""
-        label = f"{self.clock.get_fps():.1f} FPS | {self._current_tps} TPS | {self.quality}{weather_str}{day_str}"
+        fog_str = " | FOG ON" if self.fog_of_war else " | FOG OFF"
+        label = f"{self.clock.get_fps():.1f} FPS | {self._current_tps} TPS | {self.quality}{weather_str}{day_str}{fog_str}"
         if overloaded:
             label += "  **OVERLOADED**"
         light_icon = "LIGHT ON" if self.player_light_on else "LIGHT OFF"
@@ -1870,6 +2064,106 @@ class LightEngine:
         print(f"  [{self.quality}] {frames} frames, avg {avg_fps} FPS ({report['min_fps']}-{report['max_fps']})")
         return report
 
+    def _render_remote_state(self, state):
+        if state is None:
+            return
+        cam_x = 0
+        cam_y = 0
+        players = state.get("_players", [])
+        if players:
+            me = players[0]
+            cam_x = me["x"] * self.cell_size - self.screen_width // 2
+            cam_y = me["y"] * self.cell_size - self.screen_height // 2
+            cam_x = max(0, min(cam_x, self.grid_size * self.cell_size - self.screen_width))
+            cam_y = max(0, min(cam_y, self.grid_size * self.cell_size - self.screen_height))
+
+        self.screen.fill((0, 0, 0))
+
+        # Draw map grid from state
+        grid = state.get("map", self.map_grid)
+        cell = state.get("cell_size", self.cell_size)
+        gs = state.get("grid_size", self.grid_size)
+        floor_colors = {}
+        for y in range(gs):
+            for x in range(gs):
+                if grid[y][x] == 1:
+                    h = hash((x, y)) & 0xFF
+                    floor_colors[(x, y)] = (65 + h // 8, 60 + h // 8, 55 + h // 10)
+                else:
+                    h = hash((x * 7, y * 13)) & 0x7F
+                    floor_colors[(x, y)] = (90 + h // 4, 85 + h // 5, 80 + h // 6)
+
+        start_x = max(0, cam_x // cell)
+        end_x = min(gs, (cam_x + self.screen_width + cell - 1) // cell)
+        start_y = max(0, cam_y // cell)
+        end_y = min(gs, (cam_y + self.screen_height + cell - 1) // cell)
+        for y in range(start_y, end_y):
+            for x in range(start_x, end_x):
+                sx = x * cell - cam_x
+                sy = y * cell - cam_y
+                color = floor_colors.get((x, y), (80, 80, 80))
+                if grid[y][x] == 1:
+                    pygame.draw.rect(self.screen, (65, 60, 55), (sx, sy, cell, cell))
+                else:
+                    pygame.draw.rect(self.screen, color, (sx, sy, cell, cell))
+
+        # Draw static lights
+        for l in state.get("static_lights", []):
+            lx = int(l["x"] * cell - cam_x)
+            ly = int(l["y"] * cell - cam_y)
+            r = int(l["radius_cells"] * cell * 1.5)
+            surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+            c = tuple(l.get("color", (255, 200, 100)))
+            for ri in range(r, 0, -max(1, r // 16)):
+                a = int(60 * (1 - ri / r))
+                pygame.draw.circle(surf, c + (a,), (r, r), ri)
+            self.screen.blit(surf, (lx - r, ly - r))
+
+        # Draw dynamic objects
+        for o in state.get("dynamic_objects", []):
+            ox = int(o["x"] * cell - cam_x)
+            oy = int(o["y"] * cell - cam_y)
+            c = tuple(o.get("color", (200, 100, 50)))
+            s = int(cell * o.get("size", 0.8) // 2)
+            pygame.draw.circle(self.screen, c, (ox, oy), s)
+            pygame.draw.circle(self.screen, (255, 255, 255), (ox, oy), s, 1)
+
+        # Draw bots
+        for b in state.get("bots", []):
+            bx = int(b["x"] * cell - cam_x)
+            by = int(b["y"] * cell - cam_y)
+            c = tuple(b.get("color", (0, 100, 255)))
+            r = int(cell * 0.38)
+            pygame.draw.circle(self.screen, c, (bx, by), r)
+            ang = b.get("angle", 0.0)
+            ex = bx + math.cos(ang + 0.4) * cell * 0.55
+            ey = by + math.sin(ang + 0.4) * cell * 0.55
+            ex2 = bx + math.cos(ang - 0.4) * cell * 0.55
+            ey2 = by + math.sin(ang - 0.4) * cell * 0.55
+            pygame.draw.line(self.screen, (255, 255, 255), (bx, by), (int(ex), int(ey)), 2)
+            pygame.draw.line(self.screen, (255, 255, 255), (bx, by), (int(ex2), int(ey2)), 2)
+
+        # Draw all players
+        for p in players:
+            px = int(p["x"] * cell - cam_x)
+            py = int(p["y"] * cell - cam_y)
+            c = tuple(p.get("color", (0, 240, 0)))
+            pr = cell // 3
+            pygame.draw.circle(self.screen, (20, 20, 20), (px, py), pr + 3)
+            pygame.draw.circle(self.screen, c, (px, py), pr)
+            ang = p.get("angle", 0.0)
+            ex = px + math.cos(ang) * cell
+            ey = py + math.sin(ang) * cell
+            pygame.draw.line(self.screen, (255, 60, 60), (px, py), (int(ex), int(ey)), 2)
+            # Player label
+            pid = p.get("id", 0)
+            label = self.small_font.render(f"P{pid}", True, (255, 255, 255))
+            self.screen.blit(label, (px - label.get_width() // 2, py - pr - 18))
+
+        # Network info
+        conn_text = self.small_font.render("[CLIENT] Connected to server", True, (100, 200, 100))
+        self.screen.blit(conn_text, (10, 10))
+
     def run(self):
         running = True
         self._flicker_time = 0.0
@@ -1911,6 +2205,14 @@ class LightEngine:
                     elif event.key == pygame.K_r:
                         self.ray_debug = not self.ray_debug
                         self.logger.event("DEBUG", f"Ray debug {'ON' if self.ray_debug else 'OFF'}")
+                    elif event.key == pygame.K_f:
+                        self.fog_of_war = not self.fog_of_war
+                        if not self.fog_of_war:
+                            for yy in range(self.grid_size):
+                                for xx in range(self.grid_size):
+                                    self.fog_explored[yy][xx] = True
+                            self.fog_visible.clear()
+                        self.logger.event("FOG", f"Fog of war {'ON' if self.fog_of_war else 'OFF'}")
                     elif event.key == pygame.K_h:
                         self.hot_reload_config()
                     elif event.key == pygame.K_EQUALS or event.key == pygame.K_PLUS:
@@ -1921,6 +2223,8 @@ class LightEngine:
             self.profiler.start("input")
             self.handle_input(dt)
             self.profiler.end("input")
+
+            self.update_fog()
 
             pc = (int(self.player_x), int(self.player_y))
             if pc != self._last_los_player_cell:
@@ -1936,12 +2240,22 @@ class LightEngine:
                 light.update(dt)
             self.profiler.end("update")
 
+            self.screen.fill((0, 0, 0))
+
+            if self.network_mode == "client" and self._client:
+                state = self._client.get_state()
+                self._render_remote_state(state)
+                # Send input to server
+                keys = {k: True for k in self._pressed_keys if hasattr(pygame, f"K_{k}")}
+                self._client.send_input(self._pressed_keys, angle=self.player_angle, light_on=self.player_light_on)
+                self.profiler.end("frame")
+                pygame.display.flip()
+                continue
+
             cam_x = self.player_x * self.cell_size - self.screen_width // 2
             cam_y = self.player_y * self.cell_size - self.screen_height // 2
             cam_x = max(0, min(cam_x, self.grid_size * self.cell_size - self.screen_width))
             cam_y = max(0, min(cam_y, self.grid_size * self.cell_size - self.screen_height))
-
-            self.screen.fill((0, 0, 0))
 
             self.profiler.start("scene")
             self.draw_scene(self.screen, cam_x, cam_y)
@@ -1966,7 +2280,31 @@ class LightEngine:
                 self.draw_particles(cam_x, cam_y)
                 self.update_weather(dt, cam_x, cam_y)
                 self.draw_weather(cam_x, cam_y)
+                self.draw_fog_overlay(self.screen, cam_x, cam_y)
                 self.profiler.end("particles")
+
+            if self.network_mode == "server" and self._server:
+                # Overlay server info
+                nc = self._server.get_client_count()
+                srv_text = self.small_font.render(f"[SERVER] {nc} client(s)", True, (200, 200, 80))
+                self.screen.blit(srv_text, (10, 10))
+
+                # Draw remote players
+                for pid, pdata in self.network_players.items():
+                    px = int(pdata["x"] * self.cell_size - cam_x)
+                    py = int(pdata["y"] * self.cell_size - cam_y)
+                    if px < -50 or px > self.screen_width + 50 or py < -50 or py > self.screen_height + 50:
+                        continue
+                    c = pdata.get("color", [0, 240, 0])
+                    pr = self.cell_size // 3
+                    pygame.draw.circle(self.screen, (20, 20, 20), (px, py), pr + 3)
+                    pygame.draw.circle(self.screen, tuple(c), (px, py), pr)
+                    ang = pdata.get("angle", 0.0)
+                    ex = px + math.cos(ang) * self.cell_size
+                    ey = py + math.sin(ang) * self.cell_size
+                    pygame.draw.line(self.screen, (255, 60, 60), (px, py), (int(ex), int(ey)), 2)
+                    label = self.small_font.render(f"P{pid}", True, (255, 255, 255))
+                    self.screen.blit(label, (px - label.get_width() // 2, py - pr - 18))
 
             if self.debug:
                 self.draw_debug_info()
@@ -1976,6 +2314,9 @@ class LightEngine:
                 self.draw_normal_info()
 
             self.draw_ray_debug(cam_x, cam_y)
+
+            if self.network_mode == "server" and self._server:
+                self._server.broadcast_state()
 
             self.profiler.end("frame")
 
@@ -1988,6 +2329,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LightEngine v4.0.0")
     parser.add_argument("--test", choices=["low", "normal", "max", "full"], help="Run in test mode")
     parser.add_argument("--time", type=int, default=6000, help="Test duration per mode in ms (default: 6000)")
+    parser.add_argument("--server", action="store_true", help="Run as multiplayer server")
+    parser.add_argument("--client", type=str, metavar="HOST", help="Connect to server at HOST:PORT")
+    parser.add_argument("--port", type=int, default=54321, help="Network port (default: 54321)")
     args = parser.parse_args()
 
     if args.test:
@@ -2018,5 +2362,14 @@ if __name__ == "__main__":
             with open("config.json", "r") as f:
                 cfg = json.load(f)
             quality = cfg.get("quality", "normal")
-        game = LightEngine(quality=quality)
+
+        network_mode = None
+        server_host = None
+        if args.server:
+            network_mode = "server"
+        elif args.client:
+            network_mode = "client"
+            server_host = args.client
+
+        game = LightEngine(quality=quality, network_mode=network_mode, server_host=server_host)
         game.run()
